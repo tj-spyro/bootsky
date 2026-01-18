@@ -1,7 +1,7 @@
 'use client';
 
 import { AtpAgent } from '@atproto/api';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import { ProfileWithStats, FilterState } from './types';
 
@@ -39,81 +39,88 @@ export default function Home() {
     }
   };
 
-  const fetchFollows = async () => {
+  const fetchFollows = useCallback(async () => {
     if (!isAuthenticated) return;
 
     setLoading(true);
     try {
       const follows = await agent.getFollows({ actor: agent.session?.did || '' });
       
-      // Fetch detailed stats for each profile
-      const profilesWithStats = await Promise.all(
-        follows.data.follows.map(async (follow) => {
-          try {
-            // Fetch author feed to get post stats
-            const feed = await agent.getAuthorFeed({
-              actor: follow.did,
-              limit: 100,
-            });
+      // Fetch detailed stats for each profile with rate limiting
+      const profilesWithStats: ProfileWithStats[] = [];
+      
+      for (let i = 0; i < follows.data.follows.length; i++) {
+        const follow = follows.data.follows[i];
+        
+        try {
+          // Add a small delay to avoid rate limiting (50ms between requests)
+          if (i > 0 && i % 10 === 0) {
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+          
+          // Fetch author feed to get post stats (reduced to 50 for better performance)
+          const feed = await agent.getAuthorFeed({
+            actor: follow.did,
+            limit: 50,
+          });
 
-            let originalPostsCount = 0;
-            let mediaPostsCount = 0;
+          let originalPostsCount = 0;
+          let mediaPostsCount = 0;
 
-            feed.data.feed.forEach((item) => {
-              const post = item.post;
-              const isRepost = item.reason?.$type === 'app.bsky.feed.defs#reasonRepost';
-              const isReply = post.record && 'reply' in post.record;
+          feed.data.feed.forEach((item) => {
+            const post = item.post;
+            const isRepost = item.reason?.$type === 'app.bsky.feed.defs#reasonRepost';
+            const isReply = post.record && 'reply' in post.record;
 
-              // Count original posts (not reposts or replies)
-              if (!isRepost && !isReply) {
-                originalPostsCount++;
+            // Count original posts (not reposts or replies)
+            if (!isRepost && !isReply) {
+              originalPostsCount++;
 
-                // Check if post has media (images or videos)
-                const embed = post.embed;
-                if (embed) {
-                  const embedType = embed.$type;
-                  if (
-                    embedType === 'app.bsky.embed.images#view' ||
-                    embedType === 'app.bsky.embed.video#view' ||
-                    (embedType === 'app.bsky.embed.recordWithMedia#view' && 'media' in embed)
-                  ) {
-                    mediaPostsCount++;
-                  }
+              // Check if post has media (images or videos)
+              const embed = post.embed;
+              if (embed) {
+                const embedType = embed.$type;
+                if (
+                  embedType === 'app.bsky.embed.images#view' ||
+                  embedType === 'app.bsky.embed.video#view' ||
+                  (embedType === 'app.bsky.embed.recordWithMedia#view' && 'media' in embed)
+                ) {
+                  mediaPostsCount++;
                 }
               }
-            });
+            }
+          });
 
-            return {
-              did: follow.did,
-              handle: follow.handle,
-              displayName: follow.displayName,
-              avatar: follow.avatar,
-              description: follow.description,
-              postsCount: 0, // Not directly available from API
-              followersCount: 0,
-              followsCount: 0,
-              originalPostsCount,
-              mediaPostsCount,
-              hasAvatar: !!follow.avatar,
-            };
-          } catch (err) {
-            console.error(`Error fetching stats for ${follow.handle}:`, err);
-            return {
-              did: follow.did,
-              handle: follow.handle,
-              displayName: follow.displayName,
-              avatar: follow.avatar,
-              description: follow.description,
-              postsCount: 0,
-              followersCount: 0,
-              followsCount: 0,
-              originalPostsCount: 0,
-              mediaPostsCount: 0,
-              hasAvatar: !!follow.avatar,
-            };
-          }
-        })
-      );
+          profilesWithStats.push({
+            did: follow.did,
+            handle: follow.handle,
+            displayName: follow.displayName,
+            avatar: follow.avatar,
+            description: follow.description,
+            postsCount: 0,
+            followersCount: 0,
+            followsCount: 0,
+            originalPostsCount,
+            mediaPostsCount,
+            hasAvatar: !!follow.avatar,
+          });
+        } catch (err) {
+          console.error(`Error fetching stats for ${follow.handle}:`, err);
+          profilesWithStats.push({
+            did: follow.did,
+            handle: follow.handle,
+            displayName: follow.displayName,
+            avatar: follow.avatar,
+            description: follow.description,
+            postsCount: 0,
+            followersCount: 0,
+            followsCount: 0,
+            originalPostsCount: 0,
+            mediaPostsCount: 0,
+            hasAvatar: !!follow.avatar,
+          });
+        }
+      }
 
       setProfiles(profilesWithStats);
     } catch (err: unknown) {
@@ -121,14 +128,13 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAuthenticated, agent]);
 
   useEffect(() => {
     if (isAuthenticated) {
       fetchFollows();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fetchFollows]);
 
   useEffect(() => {
     // Apply filters
