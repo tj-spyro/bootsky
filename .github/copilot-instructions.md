@@ -33,7 +33,7 @@ All API responses are cached in session storage with typed keys:
 ## Critical Implementation Details
 
 ### Batch Processing
-API calls use 25-item chunks for `getProfiles()` to respect rate limits while maintaining performance ([bluesky.ts](../src/lib/bluesky.ts#L24-L30)).
+API calls use 25-item chunks for `getProfiles()` to respect rate limits while maintaining performance ([bluesky.ts](../src/lib/bluesky.ts#L17-L26)).
 
 ### Media Detection
 Media posts are identified by checking embed types:

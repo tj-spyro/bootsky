@@ -71,38 +71,28 @@ export function setCached<T>(
     return;
   }
 
-  try {
-    const key = getCacheKey(handle, type);
-    const entry: CacheEntry<T> = {
-      data,
-      timestamp: Date.now(),
-      ttl,
-    };
+  const key = getCacheKey(handle, type);
+  const entry: CacheEntry<T> = {
+    data,
+    timestamp: Date.now(),
+    ttl,
+  };
+  const jsonEntry = JSON.stringify(entry);
 
-    sessionStorage.setItem(key, JSON.stringify(entry));
+  try {
+    sessionStorage.setItem(key, jsonEntry);
   } catch (error) {
     console.error("Error writing to cache:", error);
     // If quota exceeded, try to clear old entries
-    // Check for various quota exceeded error patterns across browsers
     const isQuotaExceeded =
       error instanceof Error &&
-      (error.name === "QuotaExceededError" ||
-        // Firefox
-        (error as { code?: number }).code === 1014 ||
-        // Most browsers
-        (error as { code?: number }).code === 22);
+      error.name === "QuotaExceededError";
 
     if (isQuotaExceeded) {
       clearExpiredCache();
       // Try one more time after clearing
       try {
-        const key = getCacheKey(handle, type);
-        const entry: CacheEntry<T> = {
-          data,
-          timestamp: Date.now(),
-          ttl,
-        };
-        sessionStorage.setItem(key, JSON.stringify(entry));
+        sessionStorage.setItem(key, jsonEntry);
       } catch {
         // If it still fails, just continue without caching
       }

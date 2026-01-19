@@ -16,11 +16,11 @@ export interface ProfileWithStats extends AppBskyActorDefs.ProfileViewDetailed {
 
 const chunkArray = <T>(arr: T[], chunkSize: number): T[][] => {
   return arr.reduce((acc, cur, i) => {
-    const chunkI = Math.floor(i / chunkSize)
-    if (!acc[chunkI]) {
-      acc[chunkI] = []
+    const chunkIndex = Math.floor(i / chunkSize)
+    if (!acc[chunkIndex]) {
+      acc[chunkIndex] = []
     }
-    acc[chunkI].push(cur)
+    acc[chunkIndex].push(cur)
     return acc
   }, [] as T[][])
 }
@@ -158,10 +158,16 @@ export async function analyzeProfiles(agentInstance: typeof agent, profiles: App
 
   const uncachedProfiles = profiles.filter(profile => uncachedDids.includes(profile.did));
 
-  for (const profile of uncachedProfiles) {
-    const analyzedProfile = await analyzeProfile(agentInstance, profile);
-    analyzedProfiles.push(analyzedProfile);
-    setCached(profile.did, "profile-stats", analyzedProfile);
+  for (const batch of chunkArray(uncachedProfiles, 5)) {
+    const analyzedBatch = await Promise.all(
+      batch.map(async (profile) => {
+        const analyzedProfile = await analyzeProfile(agentInstance, profile);
+        setCached(profile.did, "profile-stats", analyzedProfile);
+        return analyzedProfile;
+      })
+    );
+
+    analyzedProfiles.push(...analyzedBatch);
   }
 
   return analyzedProfiles;
