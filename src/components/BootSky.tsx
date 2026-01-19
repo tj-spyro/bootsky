@@ -1,12 +1,25 @@
 'use client';
 
-import { AtpAgent } from '@atproto/api';
 import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
-import { ProfileWithStats, FilterState } from './types';
+import {
+  analyzeProfiles,
+  getAllFollows,
+  getDetailedFollows,
+  ProfileWithStats
+} from '../lib/bluesky';
+import { agent } from '../lib/api';
 
-export default function Home() {
-  const [agent] = useState(() => new AtpAgent({ service: 'https://bsky.social' }));
+interface FilterState {
+  noAvatar: boolean;
+  minOriginalPosts?: number;
+  maxOriginalPosts?: number;
+  minMediaPosts?: number;
+  maxMediaPosts?: number;
+}
+
+export default function BootSky() {
+  const [agentInstance] = useState(agent);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [handle, setHandle] = useState('');
   const [password, setPassword] = useState('');
@@ -16,8 +29,10 @@ export default function Home() {
   const [filteredProfiles, setFilteredProfiles] = useState<ProfileWithStats[]>([]);
   const [filters, setFilters] = useState<FilterState>({
     noAvatar: false,
-    minOriginalPosts: 0,
-    minMediaPosts: 0,
+    minOriginalPosts: undefined,
+    maxOriginalPosts: undefined,
+    minMediaPosts: undefined,
+    maxMediaPosts: undefined,
   });
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -26,7 +41,7 @@ export default function Home() {
     setLoading(true);
 
     try {
-      await agent.login({
+      await agentInstance.login({
         identifier: handle,
         password: password,
       });
@@ -44,91 +59,16 @@ export default function Home() {
 
     setLoading(true);
     try {
-      const follows = await agent.getFollows({ actor: agent.session?.did || '' });
-      
-      // Fetch detailed stats for each profile with rate limiting
-      const profilesWithStats: ProfileWithStats[] = [];
-      
-      for (let i = 0; i < follows.data.follows.length; i++) {
-        const follow = follows.data.follows[i];
-        
-        try {
-          // Add a small delay to avoid rate limiting (50ms between requests)
-          if (i > 0 && i % 10 === 0) {
-            await new Promise(resolve => setTimeout(resolve, 200));
-          }
-          
-          // Fetch author feed to get post stats (reduced to 50 for better performance)
-          const feed = await agent.getAuthorFeed({
-            actor: follow.did,
-            limit: 50,
-          });
-
-          let originalPostsCount = 0;
-          let mediaPostsCount = 0;
-
-          feed.data.feed.forEach((item) => {
-            const post = item.post;
-            const isRepost = item.reason?.$type === 'app.bsky.feed.defs#reasonRepost';
-            const isReply = post.record && 'reply' in post.record;
-
-            // Count original posts (not reposts or replies)
-            if (!isRepost && !isReply) {
-              originalPostsCount++;
-
-              // Check if post has media (images or videos)
-              const embed = post.embed;
-              if (embed) {
-                const embedType = embed.$type;
-                if (
-                  embedType === 'app.bsky.embed.images#view' ||
-                  embedType === 'app.bsky.embed.video#view' ||
-                  (embedType === 'app.bsky.embed.recordWithMedia#view' && 'media' in embed)
-                ) {
-                  mediaPostsCount++;
-                }
-              }
-            }
-          });
-
-          profilesWithStats.push({
-            did: follow.did,
-            handle: follow.handle,
-            displayName: follow.displayName,
-            avatar: follow.avatar,
-            description: follow.description,
-            postsCount: 0,
-            followersCount: 0,
-            followsCount: 0,
-            originalPostsCount,
-            mediaPostsCount,
-            hasAvatar: !!follow.avatar,
-          });
-        } catch (err) {
-          console.error(`Error fetching stats for ${follow.handle}:`, err);
-          profilesWithStats.push({
-            did: follow.did,
-            handle: follow.handle,
-            displayName: follow.displayName,
-            avatar: follow.avatar,
-            description: follow.description,
-            postsCount: 0,
-            followersCount: 0,
-            followsCount: 0,
-            originalPostsCount: 0,
-            mediaPostsCount: 0,
-            hasAvatar: !!follow.avatar,
-          });
-        }
-      }
-
+      const follows = await getAllFollows(agentInstance, agentInstance.session?.did || '');
+      const detailedProfiles = await getDetailedFollows(agentInstance, follows);
+      const profilesWithStats = await analyzeProfiles(agentInstance, detailedProfiles);
       setProfiles(profilesWithStats);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to fetch follows');
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, agent]);
+  }, [isAuthenticated, agentInstance]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -144,12 +84,20 @@ export default function Home() {
       filtered = filtered.filter(p => !p.hasAvatar);
     }
 
-    if (filters.minOriginalPosts > 0) {
-      filtered = filtered.filter(p => p.originalPostsCount >= filters.minOriginalPosts);
+    if (filters.minOriginalPosts !== undefined) {
+      filtered = filtered.filter(p => p.originalPostsCount >= filters.minOriginalPosts!);
     }
 
-    if (filters.minMediaPosts > 0) {
-      filtered = filtered.filter(p => p.mediaPostsCount >= filters.minMediaPosts);
+    if (filters.maxOriginalPosts !== undefined) {
+      filtered = filtered.filter(p => p.originalPostsCount <= filters.maxOriginalPosts!);
+    }
+
+    if (filters.minMediaPosts !== undefined) {
+      filtered = filtered.filter(p => p.mediaPostsCount >= filters.minMediaPosts!);
+    }
+
+    if (filters.maxMediaPosts !== undefined) {
+      filtered = filtered.filter(p => p.mediaPostsCount <= filters.maxMediaPosts!);
     }
 
     setFilteredProfiles(filtered);
@@ -162,8 +110,10 @@ export default function Home() {
     setFilteredProfiles([]);
     setFilters({
       noAvatar: false,
-      minOriginalPosts: 0,
-      minMediaPosts: 0,
+      minOriginalPosts: undefined,
+      maxOriginalPosts: undefined,
+      minMediaPosts: undefined,
+      maxMediaPosts: undefined,
     });
   };
 
@@ -173,7 +123,7 @@ export default function Home() {
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 w-full max-w-md">
           <h1 className="text-5xl font-bold text-blue-600 dark:text-blue-400 mb-2 text-center">Bootsky</h1>
           <p className="text-lg text-gray-700 dark:text-gray-300 mb-6 text-center">Manage your Bluesky follows</p>
-          
+
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label htmlFor="handle" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -274,7 +224,21 @@ export default function Home() {
                 type="number"
                 min="0"
                 value={filters.minOriginalPosts}
-                onChange={(e) => setFilters({ ...filters, minOriginalPosts: parseInt(e.target.value) || 0 })}
+                onChange={(e) => setFilters({ ...filters, minOriginalPosts: Number.parseInt(e.target.value) || undefined })}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="maxOriginalPosts" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Max Original Posts
+              </label>
+              <input
+                id="maxOriginalPosts"
+                type="number"
+                min="0"
+                value={filters.maxOriginalPosts}
+                onChange={(e) => setFilters({ ...filters, maxOriginalPosts: Number.parseInt(e.target.value) || undefined })}
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm"
               />
             </div>
@@ -288,7 +252,21 @@ export default function Home() {
                 type="number"
                 min="0"
                 value={filters.minMediaPosts}
-                onChange={(e) => setFilters({ ...filters, minMediaPosts: parseInt(e.target.value) || 0 })}
+                onChange={(e) => setFilters({ ...filters, minMediaPosts: Number.parseInt(e.target.value) || undefined })}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="maxMediaPosts" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Max Media Posts
+              </label>
+              <input
+                id="maxMediaPosts"
+                type="number"
+                min="0"
+                value={filters.maxMediaPosts}
+                onChange={(e) => setFilters({ ...filters, maxMediaPosts: Number.parseInt(e.target.value) || undefined })}
                 className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white text-sm"
               />
             </div>
