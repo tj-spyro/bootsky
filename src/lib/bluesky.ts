@@ -168,11 +168,12 @@ export async function analyzeProfiles(agentInstance: typeof agent, profiles: App
     );
 
     // Only add successfully analyzed profiles
-    for (const result of analyzedBatch) {
+    for (let i = 0; i < analyzedBatch.length; i++) {
+      const result = analyzedBatch[i];
       if (result.status === 'fulfilled') {
         analyzedProfiles.push(result.value);
       } else {
-        console.error('Failed to analyze profile:', result.reason);
+        console.error(`Failed to analyze profile ${batch[i].did}:`, result.reason);
       }
     }
   }
