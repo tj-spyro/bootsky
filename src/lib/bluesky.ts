@@ -159,7 +159,7 @@ export async function analyzeProfiles(agentInstance: typeof agent, profiles: App
   const uncachedProfiles = profiles.filter(profile => uncachedDids.includes(profile.did));
 
   for (const batch of chunkArray(uncachedProfiles, 5)) {
-    const analyzedBatch = await Promise.all(
+    const analyzedBatch = await Promise.allSettled(
       batch.map(async (profile) => {
         const analyzedProfile = await analyzeProfile(agentInstance, profile);
         setCached(profile.did, "profile-stats", analyzedProfile);
@@ -167,7 +167,14 @@ export async function analyzeProfiles(agentInstance: typeof agent, profiles: App
       })
     );
 
-    analyzedProfiles.push(...analyzedBatch);
+    // Only add successfully analyzed profiles
+    for (const result of analyzedBatch) {
+      if (result.status === 'fulfilled') {
+        analyzedProfiles.push(result.value);
+      } else {
+        console.error('Failed to analyze profile:', result.reason);
+      }
+    }
   }
 
   return analyzedProfiles;
