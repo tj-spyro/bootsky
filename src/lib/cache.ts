@@ -1,11 +1,14 @@
 /**
- * Session storage cache utility for Bluesky API data
+ * IndexedDB cache utility for Bluesky API data
  */
 
-const CACHE_PREFIX = "boot-sky-cache";
+const DB_NAME = "boot-sky-cache";
+const DB_VERSION = 1;
+const STORE_NAME = "cache";
 const DEFAULT_TTL = 1000 * 60 * 30; // 30 minutes
 
 interface CacheEntry<T> {
+  key: string;
   data: T;
   timestamp: number;
   ttl: number;
@@ -15,7 +18,7 @@ interface CacheEntry<T> {
  * Generate a cache key for a given handle and data type
  */
 function getCacheKey(handle: string, type: "following" | "profile" | "profile-stats"): string {
-  return `${CACHE_PREFIX}:${type}:${handle.toLowerCase()}`;
+  return `${type}:${handle.toLowerCase()}`;
 }
 
 /**
@@ -26,32 +29,85 @@ function isValid<T>(entry: CacheEntry<T>): boolean {
 }
 
 /**
- * Get data from session storage cache
+ * Initialize IndexedDB connection
  */
-export function getCached<T>(
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    if (typeof window === "undefined" || !window.indexedDB) {
+      reject(new Error("IndexedDB not available"));
+      return;
+    }
+
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+
+    request.onupgradeneeded = (event) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      
+      // Create object store if it doesn't exist
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME, { keyPath: "key" });
+      }
+    };
+  });
+}
+
+/**
+ * Get data from IndexedDB cache
+ */
+export async function getCached<T>(
   handle: string,
   type: "following" | "profile" | "profile-stats"
-): T | null {
-  if (typeof window === "undefined" || !window.sessionStorage) {
+): Promise<T | null> {
+  if (typeof window === "undefined" || !window.indexedDB) {
     return null;
   }
 
   try {
+    const db = await openDB();
     const key = getCacheKey(handle, type);
-    const cached = sessionStorage.getItem(key);
 
-    if (!cached) {
-      return null;
-    }
+    return new Promise((resolve) => {
+      const transaction = db.transaction([STORE_NAME], "readonly");
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.get(key);
 
-    const entry: CacheEntry<T> = JSON.parse(cached);
+      request.onsuccess = () => {
+        const entry = request.result as CacheEntry<T> | undefined;
 
-    if (!isValid(entry)) {
-      sessionStorage.removeItem(key);
-      return null;
-    }
+        if (!entry) {
+          resolve(null);
+          return;
+        }
 
-    return entry.data;
+        if (!isValid(entry)) {
+          // Remove expired entry
+          const deleteTransaction = db.transaction([STORE_NAME], "readwrite");
+          const deleteStore = deleteTransaction.objectStore(STORE_NAME);
+          deleteStore.delete(key);
+          resolve(null);
+          return;
+        }
+
+        resolve(entry.data);
+      };
+
+      request.onerror = () => {
+        console.error("Error reading from cache:", request.error);
+        resolve(null);
+      };
+
+      transaction.oncomplete = () => {
+        db.close();
+      };
+    });
   } catch (error) {
     console.error("Error reading from cache:", error);
     return null;
@@ -59,73 +115,91 @@ export function getCached<T>(
 }
 
 /**
- * Save data to session storage cache
+ * Save data to IndexedDB cache
  */
-export function setCached<T>(
+export async function setCached<T>(
   handle: string,
   type: "following" | "profile" | "profile-stats",
   data: T,
   ttl: number = DEFAULT_TTL
-): void {
-  if (typeof window === "undefined" || !window.sessionStorage) {
+): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) {
     return;
   }
 
   const key = getCacheKey(handle, type);
   const entry: CacheEntry<T> = {
+    key,
     data,
     timestamp: Date.now(),
     ttl,
   };
-  const jsonEntry = JSON.stringify(entry);
 
   try {
-    sessionStorage.setItem(key, jsonEntry);
+    const db = await openDB();
+
+    return new Promise((resolve) => {
+      const transaction = db.transaction([STORE_NAME], "readwrite");
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.put(entry);
+
+      request.onsuccess = () => {
+        resolve();
+      };
+
+      request.onerror = () => {
+        console.error("Error writing to cache:", request.error);
+        resolve(); // Don't fail if caching fails
+      };
+
+      transaction.oncomplete = () => {
+        db.close();
+      };
+    });
   } catch (error) {
     console.error("Error writing to cache:", error);
-    // If quota exceeded, try to clear old entries
-    const isQuotaExceeded =
-      error instanceof Error &&
-      error.name === "QuotaExceededError";
-
-    if (isQuotaExceeded) {
-      clearExpiredCache();
-      // Try one more time after clearing
-      try {
-        sessionStorage.setItem(key, jsonEntry);
-      } catch {
-        // If it still fails, just continue without caching
-      }
-    }
+    // Don't fail if caching fails
   }
 }
 
 /**
  * Clear all expired cache entries
  */
-function clearExpiredCache(): void {
-  if (typeof window === "undefined" || !window.sessionStorage) {
+export async function clearExpiredCache(): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) {
     return;
   }
 
   try {
-    const keys = Object.keys(sessionStorage);
-    const cacheKeys = keys.filter((key) => key.startsWith(CACHE_PREFIX));
+    const db = await openDB();
 
-    for (const key of cacheKeys) {
-      try {
-        const cached = sessionStorage.getItem(key);
-        if (cached) {
-          const entry: CacheEntry<unknown> = JSON.parse(cached);
+    return new Promise((resolve) => {
+      const transaction = db.transaction([STORE_NAME], "readwrite");
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.openCursor();
+
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest).result as IDBCursorWithValue | null;
+
+        if (cursor) {
+          const entry = cursor.value as CacheEntry<unknown>;
           if (!isValid(entry)) {
-            sessionStorage.removeItem(key);
+            cursor.delete();
           }
+          cursor.continue();
         }
-      } catch {
-        // If we can't parse the entry, remove it
-        sessionStorage.removeItem(key);
-      }
-    }
+      };
+
+      request.onerror = () => {
+        console.error("Error clearing expired cache:", request.error);
+        resolve();
+      };
+
+      transaction.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+    });
   } catch (error) {
     console.error("Error clearing expired cache:", error);
   }
@@ -134,18 +208,32 @@ function clearExpiredCache(): void {
 /**
  * Clear all cache entries for this app
  */
-export function clearAllCache(): void {
-  if (typeof window === "undefined" || !window.sessionStorage) {
+export async function clearAllCache(): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) {
     return;
   }
 
   try {
-    const keys = Object.keys(sessionStorage);
-    const cacheKeys = keys.filter((key) => key.startsWith(CACHE_PREFIX));
+    const db = await openDB();
 
-    for (const key of cacheKeys) {
-      sessionStorage.removeItem(key);
-    }
+    return new Promise((resolve) => {
+      const transaction = db.transaction([STORE_NAME], "readwrite");
+      const store = transaction.objectStore(STORE_NAME);
+      const request = store.clear();
+
+      request.onsuccess = () => {
+        resolve();
+      };
+
+      request.onerror = () => {
+        console.error("Error clearing cache:", request.error);
+        resolve();
+      };
+
+      transaction.oncomplete = () => {
+        db.close();
+      };
+    });
   } catch (error) {
     console.error("Error clearing cache:", error);
   }
