@@ -30,7 +30,7 @@ const chunkArray = <T>(arr: T[], chunkSize: number): T[][] => {
  */
 export async function getAllFollows(agentInstance: typeof agent, actor: string): Promise<AppBskyActorDefs.ProfileView[]> {
   // Check cache first
-  const cached = getCached<AppBskyActorDefs.ProfileView[]>(actor, "following");
+  const cached = await getCached<AppBskyActorDefs.ProfileView[]>(actor, "following");
   if (cached) {
     return cached;
   }
@@ -51,7 +51,7 @@ export async function getAllFollows(agentInstance: typeof agent, actor: string):
     } while (cursor);
 
     // Cache the results
-    setCached(actor, "following", follows);
+    await setCached(actor, "following", follows);
 
     return follows;
   } catch (error) {
@@ -67,7 +67,7 @@ export async function getDetailedFollows(agentInstance: typeof agent, basicFollo
   const uncachedDids: string[] = [];
 
   for (const did of allDids) {
-    const cached = getCached<AppBskyActorDefs.ProfileViewDetailed>(did, "profile");
+    const cached = await getCached<AppBskyActorDefs.ProfileViewDetailed>(did, "profile");
     if (cached) {
       detailedFollows.push(cached);
     }
@@ -84,7 +84,7 @@ export async function getDetailedFollows(agentInstance: typeof agent, basicFollo
 
       for (const profile of response.data.profiles) {
         detailedFollows.push(profile);
-        setCached(profile.did, "profile", profile);
+        await setCached(profile.did, "profile", profile);
       }
     } catch (error) {
       console.error(`Error fetching detailed profiles:`, error);
@@ -147,7 +147,7 @@ export async function analyzeProfiles(agentInstance: typeof agent, profiles: App
   const uncachedDids: string[] = [];
 
   for (const did of allDids) {
-    const cached = getCached<ProfileWithStats>(did, "profile-stats");
+    const cached = await getCached<ProfileWithStats>(did, "profile-stats");
     if (cached) {
       analyzedProfiles.push(cached);
     }
@@ -162,7 +162,7 @@ export async function analyzeProfiles(agentInstance: typeof agent, profiles: App
     const analyzedBatch = await Promise.allSettled(
       batch.map(async (profile) => {
         const analyzedProfile = await analyzeProfile(agentInstance, profile);
-        setCached(profile.did, "profile-stats", analyzedProfile);
+        await setCached(profile.did, "profile-stats", analyzedProfile);
         return analyzedProfile;
       })
     );
