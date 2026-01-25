@@ -88,10 +88,6 @@ export async function getCached<T>(
         }
 
         if (!isValid(entry)) {
-          // Remove expired entry
-          const deleteTransaction = db.transaction([STORE_NAME], "readwrite");
-          const deleteStore = deleteTransaction.objectStore(STORE_NAME);
-          deleteStore.delete(key);
           resolve(null);
           return;
         }
@@ -106,6 +102,18 @@ export async function getCached<T>(
 
       transaction.oncomplete = () => {
         db.close();
+        
+        // If entry was invalid, delete it asynchronously (don't wait)
+        if (request.result && !isValid(request.result as CacheEntry<T>)) {
+          openDB().then(deleteDb => {
+            const deleteTx = deleteDb.transaction([STORE_NAME], "readwrite");
+            const deleteStore = deleteTx.objectStore(STORE_NAME);
+            deleteStore.delete(key);
+            deleteTx.oncomplete = () => deleteDb.close();
+          }).catch(() => {
+            // Ignore errors during cleanup
+          });
+        }
       };
     });
   } catch (error) {
@@ -192,10 +200,14 @@ export async function clearExpiredCache(): Promise<void> {
 
       request.onerror = () => {
         console.error("Error clearing expired cache:", request.error);
-        resolve();
       };
 
       transaction.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+
+      transaction.onerror = () => {
         db.close();
         resolve();
       };
