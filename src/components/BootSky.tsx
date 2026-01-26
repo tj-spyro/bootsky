@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   analyzeProfiles,
   getAllFollows,
-  getDetailedFollows,
   ProfileWithStats
 } from '../lib/bluesky';
 import { agent } from '../lib/api';
@@ -60,8 +59,7 @@ export default function BootSky() {
     setLoading(true);
     try {
       const follows = await getAllFollows(agentInstance, agentInstance.session?.did || '');
-      const detailedProfiles = await getDetailedFollows(agentInstance, follows);
-      const profilesWithStats = await analyzeProfiles(agentInstance, detailedProfiles);
+      const profilesWithStats = await analyzeProfiles(agentInstance, follows);
       setProfiles(profilesWithStats);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to fetch follows');

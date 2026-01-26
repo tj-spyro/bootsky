@@ -60,41 +60,32 @@ export async function getAllFollows(agentInstance: typeof agent, actor: string):
   }
 }
 
-export async function getDetailedFollows(agentInstance: typeof agent, basicFollows: AppBskyActorDefs.ProfileView[]): Promise<AppBskyActorDefs.ProfileViewDetailed[]> {
-  const detailedFollows: AppBskyActorDefs.ProfileViewDetailed[] = [];
-
-  const allDids = basicFollows.map(follow => follow.did);
-  const uncachedDids: string[] = [];
-
-  for (const did of allDids) {
-    const cached = await getCached<AppBskyActorDefs.ProfileViewDetailed>(did, "profile");
-    if (cached) {
-      detailedFollows.push(cached);
-    }
-    else {
-      uncachedDids.push(did);
-    }
-  }
-
-  for (const actors of chunkArray(uncachedDids, 25)) {
+async function analyzeProfile(agentInstance: typeof agent, basicProfile: AppBskyActorDefs.ProfileView): Promise<ProfileWithStats> {
+  // First, get the detailed profile
+  const cached = await getCached<AppBskyActorDefs.ProfileViewDetailed>(basicProfile.did, "profile");
+  let profile: AppBskyActorDefs.ProfileViewDetailed;
+  
+  if (cached) {
+    profile = cached;
+  } else {
     try {
       const response = await agentInstance.app.bsky.actor.getProfiles({
-        actors,
+        actors: [basicProfile.did],
       });
-
-      for (const profile of response.data.profiles) {
-        detailedFollows.push(profile);
-        await setCached(profile.did, "profile", profile);
+      
+      if (response.data.profiles.length === 0) {
+        throw new Error(`Profile not found for ${basicProfile.did}`);
       }
+      
+      profile = response.data.profiles[0];
+      await setCached(profile.did, "profile", profile);
     } catch (error) {
-      console.error(`Error fetching detailed profiles:`, error);
-      throw new Error(`Failed to fetch detailed profiles`);
+      console.error(`Error fetching detailed profile for ${basicProfile.did}:`, error);
+      throw new Error(`Failed to fetch detailed profile for ${basicProfile.did}`);
     }
   }
-  return detailedFollows;
-}
 
-async function analyzeProfile(agentInstance: typeof agent, profile: AppBskyActorDefs.ProfileViewDetailed): Promise<ProfileWithStats> {
+  // Then, analyze the profile feed
   const feedResults: AppBskyFeedDefs.FeedViewPost[] = [];
   let cursor: string | undefined = undefined;
 
@@ -140,7 +131,7 @@ async function analyzeProfile(agentInstance: typeof agent, profile: AppBskyActor
   }
 }
 
-export async function analyzeProfiles(agentInstance: typeof agent, profiles: AppBskyActorDefs.ProfileViewDetailed[]): Promise<ProfileWithStats[]> {
+export async function analyzeProfiles(agentInstance: typeof agent, profiles: AppBskyActorDefs.ProfileView[]): Promise<ProfileWithStats[]> {
   const analyzedProfiles: ProfileWithStats[] = [];
 
   const allDids = profiles.map(profile => profile.did);
