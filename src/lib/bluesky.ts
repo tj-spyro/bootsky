@@ -14,17 +14,6 @@ export interface ProfileWithStats extends AppBskyActorDefs.ProfileViewDetailed {
   hasAvatar: boolean;
 }
 
-const chunkArray = <T>(arr: T[], chunkSize: number): T[][] => {
-  return arr.reduce((acc, cur, i) => {
-    const chunkIndex = Math.floor(i / chunkSize)
-    if (!acc[chunkIndex]) {
-      acc[chunkIndex] = []
-    }
-    acc[chunkIndex].push(cur)
-    return acc
-  }, [] as T[][])
-}
-
 /**
  * Fetch all follows (following) for a given actor with pagination
  */
@@ -151,27 +140,25 @@ export async function analyzeProfiles(
 
   const uncachedProfiles = profiles.filter(profile => uncachedDids.includes(profile.did));
 
-  for (const batch of chunkArray(uncachedProfiles, 5)) {
-    const analyzedBatch = await Promise.allSettled(
-      batch.map(async (profile) => {
-        const analyzedProfile = await analyzeProfile(agentInstance, profile);
-        await setCached(profile.did, "profile-stats", analyzedProfile);
-        return analyzedProfile;
-      })
-    );
+  const analyzedBatch = await Promise.allSettled(
+    uncachedProfiles.map(async (profile) => {
+      const analyzedProfile = await analyzeProfile(agentInstance, profile);
+      await setCached(profile.did, "profile-stats", analyzedProfile);
+      return analyzedProfile;
+    })
+  );
 
-    // Only add successfully analyzed profiles
-    for (let i = 0; i < analyzedBatch.length; i++) {
-      const result = analyzedBatch[i];
-      if (result.status === 'fulfilled') {
-        analyzedProfiles.push(result.value);
-        // Notify about each newly analyzed profile
-        if (onProfileAnalyzed) {
-          onProfileAnalyzed(result.value);
-        }
-      } else {
-        console.error(`Failed to analyze profile ${batch[i].did}:`, result.reason);
+  // Only add successfully analyzed profiles
+  for (let i = 0; i < analyzedBatch.length; i++) {
+    const result = analyzedBatch[i];
+    if (result.status === 'fulfilled') {
+      analyzedProfiles.push(result.value);
+      // Notify about each newly analyzed profile
+      if (onProfileAnalyzed) {
+        onProfileAnalyzed(result.value);
       }
+    } else {
+      console.error(`Failed to analyze profile ${uncachedProfiles[i].did}:`, result.reason);
     }
   }
 
