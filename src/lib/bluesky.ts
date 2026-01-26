@@ -62,27 +62,21 @@ export async function getAllFollows(agentInstance: typeof agent, actor: string):
 
 async function analyzeProfile(agentInstance: typeof agent, basicProfile: AppBskyActorDefs.ProfileView): Promise<ProfileWithStats> {
   // First, get the detailed profile
-  const cached = await getCached<AppBskyActorDefs.ProfileViewDetailed>(basicProfile.did, "profile");
   let profile: AppBskyActorDefs.ProfileViewDetailed;
   
-  if (cached) {
-    profile = cached;
-  } else {
-    try {
-      const response = await agentInstance.app.bsky.actor.getProfiles({
-        actors: [basicProfile.did],
-      });
-      
-      if (response.data.profiles.length === 0) {
-        throw new Error(`Profile not found for ${basicProfile.did}`);
-      }
-      
-      profile = response.data.profiles[0];
-      await setCached(profile.did, "profile", profile);
-    } catch (error) {
-      console.error(`Error fetching detailed profile for ${basicProfile.did}:`, error);
-      throw new Error(`Failed to fetch detailed profile for ${basicProfile.did}`);
+  try {
+    const response = await agentInstance.app.bsky.actor.getProfiles({
+      actors: [basicProfile.did],
+    });
+    
+    if (response.data.profiles.length === 0) {
+      throw new Error(`Profile not found for ${basicProfile.did}`);
     }
+    
+    profile = response.data.profiles[0];
+  } catch (error) {
+    console.error(`Error fetching detailed profile for ${basicProfile.did}:`, error);
+    throw new Error(`Failed to fetch detailed profile for ${basicProfile.did}`);
   }
 
   // Then, analyze the profile feed
