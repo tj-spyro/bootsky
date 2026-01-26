@@ -71,7 +71,8 @@ export default function BootSky() {
       
       setAnalyzing(false);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch follows');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch follows';
+      setError(errorMessage);
       setLoading(false);
       setAnalyzing(false);
     }
