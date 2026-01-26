@@ -125,7 +125,11 @@ async function analyzeProfile(agentInstance: typeof agent, basicProfile: AppBsky
   }
 }
 
-export async function analyzeProfiles(agentInstance: typeof agent, profiles: AppBskyActorDefs.ProfileView[]): Promise<ProfileWithStats[]> {
+export async function analyzeProfiles(
+  agentInstance: typeof agent, 
+  profiles: AppBskyActorDefs.ProfileView[],
+  onProfileAnalyzed?: (profile: ProfileWithStats) => void
+): Promise<ProfileWithStats[]> {
   const analyzedProfiles: ProfileWithStats[] = [];
 
   const allDids = profiles.map(profile => profile.did);
@@ -135,6 +139,10 @@ export async function analyzeProfiles(agentInstance: typeof agent, profiles: App
     const cached = await getCached<ProfileWithStats>(did, "profile-stats");
     if (cached) {
       analyzedProfiles.push(cached);
+      // Notify about cached profile immediately
+      if (onProfileAnalyzed) {
+        onProfileAnalyzed(cached);
+      }
     }
     else {
       uncachedDids.push(did);
@@ -157,6 +165,10 @@ export async function analyzeProfiles(agentInstance: typeof agent, profiles: App
       const result = analyzedBatch[i];
       if (result.status === 'fulfilled') {
         analyzedProfiles.push(result.value);
+        // Notify about each newly analyzed profile
+        if (onProfileAnalyzed) {
+          onProfileAnalyzed(result.value);
+        }
       } else {
         console.error(`Failed to analyze profile ${batch[i].did}:`, result.reason);
       }
