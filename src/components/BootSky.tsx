@@ -24,6 +24,7 @@ export default function BootSky() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [profiles, setProfiles] = useState<ProfileWithStats[]>([]);
   const [filteredProfiles, setFilteredProfiles] = useState<ProfileWithStats[]>([]);
   const [filters, setFilters] = useState<FilterState>({
@@ -57,14 +58,22 @@ export default function BootSky() {
     if (!isAuthenticated) return;
 
     setLoading(true);
+    setProfiles([]); // Clear existing profiles
     try {
       const follows = await getAllFollows(agentInstance, agentInstance.session?.did || '');
-      const profilesWithStats = await analyzeProfiles(agentInstance, follows);
-      setProfiles(profilesWithStats);
+      setLoading(false);
+      setAnalyzing(true);
+      
+      // Analyze profiles with incremental callback
+      await analyzeProfiles(agentInstance, follows, (analyzedProfile) => {
+        setProfiles(prev => [...prev, analyzedProfile]);
+      });
+      
+      setAnalyzing(false);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to fetch follows');
-    } finally {
       setLoading(false);
+      setAnalyzing(false);
     }
   }, [isAuthenticated, agentInstance]);
 
@@ -297,10 +306,16 @@ export default function BootSky() {
 
         {/* Results */}
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg">
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
             <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
               Following ({filteredProfiles.length} of {profiles.length})
             </h2>
+            {analyzing && (
+              <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                <span className="text-sm">Analyzing profiles...</span>
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -308,7 +323,7 @@ export default function BootSky() {
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               <p className="mt-4 text-gray-700 dark:text-gray-300">Loading follows...</p>
             </div>
-          ) : filteredProfiles.length === 0 ? (
+          ) : filteredProfiles.length === 0 && !analyzing ? (
             <div className="p-8 text-center text-gray-700 dark:text-gray-300">
               {profiles.length === 0 ? 'No follows found' : 'No profiles match the selected filters'}
             </div>
