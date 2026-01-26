@@ -156,6 +156,9 @@ export async function analyzeProfiles(
       batch.map(async (profile) => {
         const analyzedProfile = await analyzeProfile(agentInstance, profile);
         await setCached(profile.did, "profile-stats", analyzedProfile);
+        if (onProfileAnalyzed) {
+          onProfileAnalyzed(result.value);
+        }
         return analyzedProfile;
       })
     );
@@ -165,10 +168,6 @@ export async function analyzeProfiles(
       const result = analyzedBatch[i];
       if (result.status === 'fulfilled') {
         analyzedProfiles.push(result.value);
-        // Notify about each newly analyzed profile
-        if (onProfileAnalyzed) {
-          onProfileAnalyzed(result.value);
-        }
       } else {
         console.error(`Failed to analyze profile ${batch[i].did}:`, result.reason);
       }
