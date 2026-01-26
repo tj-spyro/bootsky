@@ -157,7 +157,7 @@ export async function analyzeProfiles(
         const analyzedProfile = await analyzeProfile(agentInstance, profile);
         await setCached(profile.did, "profile-stats", analyzedProfile);
         if (onProfileAnalyzed) {
-          onProfileAnalyzed(result.value);
+          onProfileAnalyzed(analyzedProfile);
         }
         return analyzedProfile;
       })
