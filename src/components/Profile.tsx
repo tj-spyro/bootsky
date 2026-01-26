@@ -7,7 +7,7 @@ interface ProfileProps {
 
 export default function Profile({ profile }: ProfileProps) {
   return (
-    <div key={profile.did} className="p-6 hover:bg-blue-50 dark:hover:bg-gray-700 transition">
+    <div className="p-6 hover:bg-blue-50 dark:hover:bg-gray-700 transition">
       <div className="flex items-start gap-4">
         {profile.avatar ? (
           <Image
